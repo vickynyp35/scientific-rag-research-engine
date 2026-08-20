@@ -3,14 +3,13 @@ import pymupdf
 import faiss
 import requests
 import re
-import time
 
 from sentence_transformers import SentenceTransformer, CrossEncoder
 from rank_bm25 import BM25Okapi
 
 
 # =========================================================
-# PAGE CONFIGURATION
+# PAGE CONFIG
 # =========================================================
 
 st.set_page_config(
@@ -22,8 +21,7 @@ st.set_page_config(
 st.title("🔬 Scientific RAG Research Engine")
 
 st.caption(
-    "Multi-Paper Hybrid RAG with "
-    "FAISS + BM25 + Cross-Encoder Reranking"
+    "Multi-Paper Hybrid RAG with FAISS + BM25 + Cross-Encoder Reranking"
 )
 
 
@@ -33,19 +31,7 @@ st.caption(
 
 EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
 
-RERANKER_MODEL_NAME = (
-    "cross-encoder/ms-marco-MiniLM-L-6-v2"
-)
-
-OLLAMA_URL = (
-    "http://localhost:11434/api/generate"
-)
-
-OLLAMA_TAGS_URL = (
-    "http://localhost:11434/api/tags"
-)
-
-OLLAMA_MODEL = "llama3.2:3b"
+RERANKER_MODEL_NAME = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
 TOP_K_FAISS = 10
 TOP_K_HYBRID = 10
@@ -58,8 +44,21 @@ MIN_HYBRID_SCORE = 0.18
 MIN_RELEVANCE_SCORE = 0.25
 
 FALLBACK_ANSWER = (
-    "I could not find this information "
-    "in the provided research papers."
+    "I could not find this information in the provided research papers."
+)
+
+
+# =========================================================
+# GEMINI CONFIG
+# =========================================================
+
+GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
+
+GEMINI_MODEL = "gemini-2.5-flash"
+
+GEMINI_URL = (
+    f"https://generativelanguage.googleapis.com/v1beta/models/"
+    f"{GEMINI_MODEL}:generateContent"
 )
 
 
@@ -179,165 +178,117 @@ def min_max_normalize(values):
 
 
 # =========================================================
-# OLLAMA HEALTH CHECK
-# =========================================================
-
-def check_ollama():
-
-    try:
-
-        response = requests.get(
-            OLLAMA_TAGS_URL,
-            timeout=10
-        )
-
-        if response.status_code != 200:
-
-            return False, (
-                f"Ollama server returned "
-                f"HTTP {response.status_code}"
-            )
-
-        data = response.json()
-
-        models = [
-            item.get("name", "")
-            for item in data.get("models", [])
-        ]
-
-        if OLLAMA_MODEL not in models:
-
-            return False, (
-                f"Model '{OLLAMA_MODEL}' "
-                f"is not available."
-            )
-
-        return True, "Ollama is ready."
-
-    except requests.exceptions.ConnectionError:
-
-        return False, (
-            "Cannot connect to Ollama. "
-            "Make sure Ollama is running."
-        )
-
-    except requests.exceptions.Timeout:
-
-        return False, (
-            "Ollama health check timed out."
-        )
-
-    except Exception as e:
-
-        return False, str(e)
-
-
-# =========================================================
-# GENERATE ANSWER WITH OLLAMA
+# GEMINI ANSWER GENERATION
 # =========================================================
 
 def generate_answer(prompt):
 
+    if not GEMINI_API_KEY:
+
+        return None, (
+            "Gemini API key is missing. "
+            "Add GEMINI_API_KEY in Streamlit Secrets."
+        )
+
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": GEMINI_API_KEY
+    }
+
     payload = {
 
-        "model": OLLAMA_MODEL,
+        "contents": [
+            {
+                "parts": [
+                    {
+                        "text": prompt
+                    }
+                ]
+            }
+        ],
 
-        "prompt": prompt,
-
-        "stream": False,
-
-        "options": {
+        "generationConfig": {
 
             "temperature": 0.0,
 
-            "num_predict": 500,
-
-            "num_ctx": 4096
-
+            "maxOutputTokens": 700
         }
-
     }
 
-    max_attempts = 2
+    try:
 
-    for attempt in range(max_attempts):
+        response = requests.post(
+            GEMINI_URL,
+            headers=headers,
+            json=payload,
+            timeout=120
+        )
 
-        try:
-
-            response = requests.post(
-                OLLAMA_URL,
-                json=payload,
-                timeout=180
-            )
-
-            if response.status_code == 200:
-
-                try:
-
-                    result = response.json()
-
-                except ValueError:
-
-                    return None, (
-                        "Ollama returned invalid JSON."
-                    )
-
-                answer = result.get(
-                    "response",
-                    ""
-                )
-
-                if not answer.strip():
-
-                    return None, (
-                        "Ollama returned an empty answer."
-                    )
-
-                return answer.strip(), None
-
-            if response.status_code >= 500:
-
-                if attempt < max_attempts - 1:
-
-                    time.sleep(2)
-
-                    continue
-
-                return None, (
-                    f"Ollama returned HTTP "
-                    f"{response.status_code}\n\n"
-                    f"{response.text}"
-                )
+        if response.status_code != 200:
 
             return None, (
-                f"Ollama returned HTTP "
-                f"{response.status_code}\n\n"
+                f"Gemini API Error "
+                f"{response.status_code}: "
                 f"{response.text}"
             )
 
-        except requests.exceptions.ConnectionError:
+        data = response.json()
+
+        candidates = data.get(
+            "candidates",
+            []
+        )
+
+        if not candidates:
 
             return None, (
-                "Could not connect to Ollama."
+                "Gemini returned no answer."
             )
 
-        except requests.exceptions.Timeout:
+        parts = candidates[0].get(
+            "content",
+            {}
+        ).get(
+            "parts",
+            []
+        )
+
+        answer = ""
+
+        for part in parts:
+
+            answer += part.get(
+                "text",
+                ""
+            )
+
+        if not answer.strip():
 
             return None, (
-                "Ollama request timed out."
+                "Gemini returned an empty answer."
             )
 
-        except Exception as e:
+        return answer.strip(), None
 
-            return None, (
-                f"Unexpected Ollama error: {e}"
-            )
+    except requests.exceptions.Timeout:
 
-    return None, "Unknown Ollama error."
+        return None, (
+            "Gemini request timed out."
+        )
+
+    except requests.exceptions.ConnectionError:
+
+        return None, (
+            "Could not connect to Gemini API."
+        )
+
+    except Exception as e:
+
+        return None, str(e)
 
 
 # =========================================================
-# BUILD CONTEXT FOR QUESTION ANSWERING
+# BUILD CONTEXT
 # =========================================================
 
 def build_context(
@@ -386,7 +337,9 @@ def build_context(
         context_parts.append(
             f"""
 SOURCE {number}
+
 File: {source['source']}
+
 Page: {source['page']}
 
 Content:
@@ -418,6 +371,7 @@ def build_paper_context(
         filename = source["source"]
 
         if filename not in papers:
+
             papers[filename] = []
 
         papers[filename].append(
@@ -472,7 +426,7 @@ if uploaded_files:
 
 
     # =====================================================
-    # READ PDF FILES
+    # READ PDFs
     # =====================================================
 
     with st.spinner(
@@ -528,7 +482,7 @@ if uploaded_files:
 
                     failed_files.append(
                         f"{uploaded_file.name} "
-                        f"(no readable text)"
+                        "(no readable text)"
                     )
 
             except Exception as e:
@@ -573,8 +527,7 @@ if uploaded_files:
     # =====================================================
 
     st.success(
-        f"✅ {processed_files} PDF(s) "
-        f"processed successfully!"
+        f"✅ {processed_files} PDF(s) processed successfully!"
     )
 
     for failed in failed_files:
@@ -602,7 +555,7 @@ if uploaded_files:
 
 
     # =====================================================
-    # CREATE EMBEDDINGS
+    # EMBEDDINGS
     # =====================================================
 
     with st.spinner(
@@ -621,7 +574,7 @@ if uploaded_files:
 
 
     # =====================================================
-    # CREATE FAISS INDEX
+    # FAISS
     # =====================================================
 
     dimension = embeddings.shape[1]
@@ -639,13 +592,12 @@ if uploaded_files:
     )
 
     st.write(
-        f"### 🔍 Vectors Stored: "
-        f"{index.ntotal}"
+        f"### 🔍 Vectors Stored: {index.ntotal}"
     )
 
 
     # =====================================================
-    # CREATE BM25
+    # BM25
     # =====================================================
 
     tokenized_chunks = [
@@ -675,9 +627,8 @@ if uploaded_files:
         )
 
         st.caption(
-            "Compare the uploaded research papers "
-            "for agreements, contradictions, "
-            "and research gaps."
+            "Compare research papers for agreements, "
+            "contradictions and research gaps."
         )
 
         comparison_type = st.selectbox(
@@ -686,13 +637,11 @@ if uploaded_files:
                 "🤝 Agreements",
                 "⚡ Contradictions",
                 "🔎 Research Gaps"
-            ],
-            key="comparison_type"
+            ]
         )
 
         compare_button = st.button(
-            "🔬 Analyze Papers",
-            key="compare_papers"
+            "🔬 Analyze Papers"
         )
 
         if compare_button:
@@ -705,62 +654,55 @@ if uploaded_files:
             if comparison_type == "🤝 Agreements":
 
                 comparison_instruction = """
-Identify the main points where the research
-papers agree with each other.
+Identify the main points where the papers agree.
 
 For each agreement:
 - Explain the shared finding.
-- Mention the relevant paper names.
+- Mention paper names.
 - Mention page numbers when supported.
-- Do not invent information.
 """
 
             elif comparison_type == "⚡ Contradictions":
 
                 comparison_instruction = """
-Identify meaningful contradictions or
-differences between the research papers.
+Identify meaningful contradictions or differences.
 
-For each contradiction:
-- Explain what Paper A reports.
-- Explain what Paper B reports.
+For each difference:
+- Explain Paper A.
+- Explain Paper B.
 - Clearly state the difference.
-- Mention paper names.
-- Mention page numbers when supported.
-- Do not assume that two different methods
-  automatically mean contradiction.
+- Mention paper names and pages.
+- Do not treat different methods automatically as contradictions.
 """
 
             else:
 
                 comparison_instruction = """
-Identify research gaps based ONLY on the
-provided research papers.
+Identify research gaps based ONLY on the papers.
 
 Look for:
-- Missing areas of research.
-- Limitations mentioned by the papers.
+- Missing research areas.
+- Limitations.
 - Unanswered questions.
-- Areas requiring future investigation.
+- Future research directions.
 
-Do not invent research gaps that are not
-reasonably supported by the provided papers.
+Do not invent unsupported gaps.
 """
 
             comparison_prompt = f"""
 You are a scientific research comparison assistant.
 
-Use ONLY the research papers provided below.
+Use ONLY the research papers provided.
 
-STRICT RULES:
+RULES:
 
 1. Do not use outside knowledge.
 2. Do not invent facts.
 3. Do not guess.
 4. Do not fabricate citations.
 5. Compare only the provided papers.
-6. Clearly identify the paper names.
-7. Keep the analysis structured and concise.
+6. Clearly identify paper names.
+7. Keep the answer structured.
 
 TASK:
 
@@ -774,53 +716,26 @@ ANALYSIS:
 """
 
             with st.spinner(
-                "🧠 AI is comparing the research papers..."
+                "🧠 Comparing research papers..."
             ):
 
-                ollama_ready, ollama_message = (
-                    check_ollama()
+                answer, error = generate_answer(
+                    comparison_prompt
                 )
 
-            if not ollama_ready:
+            if answer:
 
-                st.error(
-                    f"❌ {ollama_message}"
+                st.subheader(
+                    "📊 Comparison Result"
                 )
+
+                st.write(answer)
 
             else:
 
-                with st.spinner(
-                    "🤖 Generating comparison..."
-                ):
-
-                    comparison_answer, comparison_error = (
-                        generate_answer(
-                            comparison_prompt
-                        )
-                    )
-
-                if comparison_answer:
-
-                    st.subheader(
-                        "📊 Comparison Result"
-                    )
-
-                    st.write(
-                        comparison_answer
-                    )
-
-                else:
-
-                    st.error(
-                        "❌ Comparison analysis failed."
-                    )
-
-                    st.code(
-                        comparison_error
-                        if comparison_error
-                        else "Unknown Ollama error.",
-                        language="text"
-                    )
+                st.error(
+                    f"❌ {error}"
+                )
 
 
     # =====================================================
@@ -834,8 +749,7 @@ ANALYSIS:
     )
 
     question = st.text_input(
-        "Enter your question about the research papers:",
-        key="research_question"
+        "Enter your question about the research papers:"
     )
 
 
@@ -847,11 +761,6 @@ ANALYSIS:
 
         clean_question = question.strip()
 
-
-        # =================================================
-        # QUESTION VALIDATION
-        # =================================================
-
         if len(clean_question) < 3:
 
             st.warning(
@@ -862,16 +771,12 @@ ANALYSIS:
 
 
         # =================================================
-        # HYBRID SEARCH
+        # QUERY EMBEDDING
         # =================================================
 
         with st.spinner(
             "🔍 Running hybrid search..."
         ):
-
-            # ---------------------------------------------
-            # QUERY EMBEDDING
-            # ---------------------------------------------
 
             question_embedding = model.encode(
                 [clean_question],
@@ -881,9 +786,9 @@ ANALYSIS:
             )
 
 
-            # ---------------------------------------------
+            # =============================================
             # FAISS SEARCH
-            # ---------------------------------------------
+            # =============================================
 
             faiss_k = min(
                 TOP_K_FAISS,
@@ -898,36 +803,6 @@ ANALYSIS:
             )
 
 
-            # ---------------------------------------------
-            # BM25 SEARCH
-            # ---------------------------------------------
-
-            tokenized_question = tokenize(
-                clean_question
-            )
-
-            bm25_scores_raw = (
-                bm25.get_scores(
-                    tokenized_question
-                )
-            )
-
-
-            # ---------------------------------------------
-            # NORMALIZE BM25
-            # ---------------------------------------------
-
-            bm25_normalized = (
-                min_max_normalize(
-                    list(bm25_scores_raw)
-                )
-            )
-
-
-            # ---------------------------------------------
-            # FAISS SCORES
-            # ---------------------------------------------
-
             faiss_scores = {}
 
             for rank, idx in enumerate(
@@ -939,16 +814,35 @@ ANALYSIS:
                 if idx < 0:
                     continue
 
-                score = float(
+                faiss_scores[idx] = float(
                     faiss_raw[0][rank]
                 )
 
-                faiss_scores[idx] = score
+
+            # =============================================
+            # BM25
+            # =============================================
+
+            tokenized_question = tokenize(
+                clean_question
+            )
+
+            bm25_scores_raw = (
+                bm25.get_scores(
+                    tokenized_question
+                )
+            )
+
+            bm25_normalized = (
+                min_max_normalize(
+                    list(bm25_scores_raw)
+                )
+            )
 
 
-            # ---------------------------------------------
-            # HYBRID SCORES
-            # ---------------------------------------------
+            # =============================================
+            # HYBRID SCORE
+            # =============================================
 
             hybrid_scores = {}
 
@@ -967,20 +861,16 @@ ANALYSIS:
                     bm25_normalized[idx]
                 )
 
-                hybrid_score = (
+                hybrid_scores[idx] = (
                     0.60 * semantic_score
                     +
                     0.40 * keyword_score
                 )
 
-                hybrid_scores[idx] = (
-                    hybrid_score
-                )
 
-
-            # ---------------------------------------------
-            # SORT HYBRID
-            # ---------------------------------------------
+            # =============================================
+            # TOP HYBRID
+            # =============================================
 
             sorted_hybrid = sorted(
                 hybrid_scores.items(),
@@ -988,25 +878,20 @@ ANALYSIS:
                 reverse=True
             )
 
-            candidate_count = min(
-                TOP_K_HYBRID,
-                len(sorted_hybrid)
-            )
-
             candidate_indices = [
                 item[0]
                 for item in sorted_hybrid[
-                    :candidate_count
+                    :TOP_K_HYBRID
                 ]
             ]
 
-            candidate_indices = candidate_indices[
-                :TOP_K_RERANK
-            ]
+            candidate_indices = (
+                candidate_indices[:TOP_K_RERANK]
+            )
 
 
         # =================================================
-        # CROSS ENCODER RERANKING
+        # CROSS ENCODER
         # =================================================
 
         with st.spinner(
@@ -1021,15 +906,13 @@ ANALYSIS:
                 for idx in candidate_indices
             ]
 
-            rerank_scores = (
-                reranker.predict(
-                    rerank_pairs
-                )
+            rerank_scores = reranker.predict(
+                rerank_pairs
             )
 
 
         # =================================================
-        # BUILD RERANKED RESULTS
+        # RERANKED RESULTS
         # =================================================
 
         reranked_results = []
@@ -1068,19 +951,14 @@ ANALYSIS:
             )
 
 
-        # =================================================
-        # SORT RERANKER
-        # =================================================
-
         reranked_results.sort(
-            key=lambda x:
-            x["rerank_score"],
+            key=lambda x: x["rerank_score"],
             reverse=True
         )
 
 
         # =================================================
-        # NORMALIZED RERANK SCORE
+        # NORMALIZE RERANK SCORE
         # =================================================
 
         rerank_values = [
@@ -1099,18 +977,12 @@ ANALYSIS:
             reranked_results
         ):
 
-            rerank_component = (
-                normalized_rerank[position]
-            )
-
-            hybrid_component = (
-                item["hybrid_score"]
-            )
-
             relevance = (
-                0.65 * rerank_component
+                0.65 *
+                normalized_rerank[position]
                 +
-                0.35 * hybrid_component
+                0.35 *
+                item["hybrid_score"]
             )
 
             item["relevance_score"] = max(
@@ -1153,11 +1025,12 @@ ANALYSIS:
             )
 
             if len(final_results) >= TOP_K_FINAL:
+
                 break
 
 
         # =================================================
-        # RELEVANCE CHECK
+        # RELEVANCE
         # =================================================
 
         is_relevant = False
@@ -1166,26 +1039,16 @@ ANALYSIS:
 
             best = final_results[0]
 
-            best_hybrid = (
-                best["hybrid_score"]
-            )
-
-            best_relevance = (
-                best["relevance_score"]
-            )
-
             if (
-                best_hybrid >= MIN_HYBRID_SCORE
+                best["hybrid_score"]
+                >= MIN_HYBRID_SCORE
                 and
-                best_relevance >= MIN_RELEVANCE_SCORE
+                best["relevance_score"]
+                >= MIN_RELEVANCE_SCORE
             ):
 
                 is_relevant = True
 
-
-        # =================================================
-        # RELEVANCE DISPLAY
-        # =================================================
 
         if final_results:
 
@@ -1202,40 +1065,23 @@ ANALYSIS:
 
 
         # =================================================
-        # NOT RELEVANT
+        # ANSWER
         # =================================================
 
         if not is_relevant:
 
             st.warning(
                 "⚠️ I could not find sufficiently "
-                "relevant information in the uploaded "
-                "research papers."
+                "relevant information in the uploaded papers."
             )
-
-            st.write(
-                "Try asking a question specifically "
-                "related to the uploaded research papers."
-            )
-
-
-        # =================================================
-        # GENERATE AI ANSWER
-        # =================================================
 
         else:
 
             source_context = build_context(
                 final_results,
                 pages,
-                chunks,
-                MAX_CONTEXT_CHARS
+                chunks
             )
-
-
-            # ---------------------------------------------
-            # OLLAMA PROMPT
-            # ---------------------------------------------
 
             prompt = f"""
 You are a scientific research-paper
@@ -1252,8 +1098,7 @@ STRICT RULES:
 5. Answer only what the sources support.
 6. Keep the answer concise but useful.
 7. Cite the file name and page number.
-8. If the answer is not supported by the sources,
-respond exactly:
+8. If the answer is not supported, respond exactly:
 
 {FALLBACK_ANSWER}
 
@@ -1268,61 +1113,29 @@ USER QUESTION:
 ANSWER:
 """
 
-
-            # ---------------------------------------------
-            # CHECK OLLAMA
-            # ---------------------------------------------
-
             with st.spinner(
-                "🔌 Checking Ollama..."
+                "🤖 Generating AI answer..."
             ):
 
-                ollama_ready, ollama_message = (
-                    check_ollama()
+                answer_text, error = (
+                    generate_answer(prompt)
                 )
 
+            if answer_text:
 
-            if not ollama_ready:
+                st.subheader(
+                    "🤖 AI Answer"
+                )
 
-                st.error(
-                    f"❌ {ollama_message}"
+                st.write(
+                    answer_text
                 )
 
             else:
 
-                with st.spinner(
-                    "🤖 Generating AI answer..."
-                ):
-
-                    answer_text, ollama_error = (
-                        generate_answer(
-                            prompt
-                        )
-                    )
-
-
-                if answer_text:
-
-                    st.subheader(
-                        "🤖 AI Answer"
-                    )
-
-                    st.write(
-                        answer_text
-                    )
-
-                else:
-
-                    st.error(
-                        "❌ AI answer generation failed."
-                    )
-
-                    st.code(
-                        ollama_error
-                        if ollama_error
-                        else "Unknown Ollama error.",
-                        language="text"
-                    )
+                st.error(
+                    f"❌ {error}"
+                )
 
 
         # =================================================
@@ -1417,7 +1230,7 @@ ANSWER:
 
 
 # =========================================================
-# NO FILE MESSAGE
+# NO FILE
 # =========================================================
 
 else:
@@ -1438,11 +1251,11 @@ else:
 - 🔤 BM25 keyword search
 - 🔀 Hybrid retrieval
 - 🧠 Cross-Encoder reranking
-- 🤖 Ollama LLM generation
+- 🤖 Gemini AI generation
 - 📚 Citation-based answers
 - 📊 Multi-paper comparison
 - 🤝 Agreement detection
 - ⚡ Contradiction detection
 - 🔎 Research gap detection
-        """
+"""
     )

@@ -1,10 +1,8 @@
 streamlit
-faiss-cpu
-rank-bm25
-sentence-transformers
 pymupdf
-scikit-learn
-numpy
-pandas
+faiss-cpu
+requests
+sentence-transformers
+rank-bm25
 torch
-transformers
+torchvision

@@ -54,8 +54,7 @@ FALLBACK_ANSWER = (
 
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
 
-GEMINI_MODEL = "gemini-2.5-flash"
-
+model = "gemini-3.6-flash"
 GEMINI_URL = (
     f"https://generativelanguage.googleapis.com/v1beta/models/"
     f"{GEMINI_MODEL}:generateContent"

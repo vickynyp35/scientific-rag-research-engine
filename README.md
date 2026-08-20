@@ -1,167 +1,152 @@
 # 🔬 Scientific RAG Research Engine
 
-An AI-powered research assistant that allows users to upload multiple scientific research papers and ask questions based on their content.
+A Multi-Paper Hybrid Retrieval-Augmented Generation (RAG) system for querying and comparing scientific research papers.
 
-The system uses **Hybrid Retrieval-Augmented Generation (RAG)** with FAISS, BM25, and Cross-Encoder reranking to retrieve relevant research content and generate citation-based answers using Ollama.
+## 🚀 Live Demo
 
-## 🚀 Features
+https://scientific-rag-research-engine-xmzmmntq79usfdbcfazvav.streamlit.app/
 
-* 📄 Upload multiple scientific PDF research papers
-* ✂️ Automatic text extraction and chunking
-* 🔍 FAISS semantic search
-* 🔤 BM25 keyword search
-* 🔀 Hybrid retrieval combining semantic and keyword search
-* 🧠 Cross-Encoder reranking
-* 🎯 Retrieval relevance scoring
-* 🤖 AI-powered question answering
-* 📚 Source-based answers with file and page citations
-* ⚖️ Multi-paper comparison
-* 🤝 Identify agreements between papers
-* ⚡ Identify contradictions between papers
-* 🔎 Identify potential research gaps
-* 🛡️ Source-grounded answers to reduce unsupported responses
+## 📌 Overview
 
-## 🛠️ Technologies Used
+Scientific RAG Research Engine allows users to upload multiple research papers and ask questions based only on the uploaded documents.
 
-* **Python**
-* **Streamlit**
-* **FAISS**
-* **BM25**
-* **Sentence Transformers**
-* **Cross-Encoder**
-* **Ollama**
-* **PyMuPDF**
-* **Requests**
+The system combines semantic search, keyword search, hybrid retrieval, and Cross-Encoder reranking to retrieve relevant research content before generating answers using Gemini.
 
-## 🧠 RAG Pipeline
+## ✨ Features
 
-```text
-Scientific Research Papers
-          ↓
-      PDF Upload
-          ↓
-   Text Extraction
-          ↓
-      Chunking
-          ↓
- ┌─────────────────────┐
- │  FAISS Semantic     │
- │  Search             │
- └─────────────────────┘
-          +
- ┌─────────────────────┐
- │  BM25 Keyword       │
- │  Search             │
- └─────────────────────┘
-          ↓
-    Hybrid Retrieval
-          ↓
- Cross-Encoder Reranking
-          ↓
-   Relevance Filtering
-          ↓
-     Context Building
-          ↓
-      Ollama LLM
-          ↓
- Citation-Based Answer
-```
+- 📄 Multi-PDF research paper upload
+- ✂️ Text extraction and chunking
+- 🔢 Sentence Transformer embeddings
+- 🔍 FAISS semantic search
+- 🔤 BM25 keyword search
+- 🔀 Hybrid retrieval
+- 🧠 Cross-Encoder reranking
+- 🤖 Gemini-powered answer generation
+- 📚 Source and page citations
+- 📊 Multi-paper comparison
+- 🤝 Agreement detection
+- ⚡ Contradiction detection
+- 🔎 Research gap detection
+- ☁️ Streamlit Cloud deployment
 
-## 📊 Paper Comparison
+## 🏗️ System Architecture
 
-The system can compare multiple uploaded research papers and analyze:
+Research PDFs
+     ↓
+Text Extraction
+     ↓
+Text Chunking
+     ↓
+Sentence Transformer
+     ↓
+FAISS Vector Search
+     +
+BM25 Keyword Search
+     ↓
+Hybrid Retrieval
+     ↓
+Cross-Encoder Reranking
+     ↓
+Top Relevant Sources
+     ↓
+Gemini
+     ↓
+Citation-Based Answer
 
-* 🤝 Agreements
-* ⚡ Contradictions
-* 🔎 Research gaps
+🛠️ Technologies Used
+Python
+Streamlit
+PyMuPDF
+FAISS
+BM25
+Sentence Transformers
+Cross-Encoder
+Gemini API
+Requests
 
-The comparison is performed using only the uploaded research papers.
+🔬 How It Works
+1. Document Processing
 
-## ▶️ How to Run
+Research papers are uploaded as PDF files and their text is extracted using PyMuPDF.
 
-### 1. Clone the repository
+2. Chunking
 
-```bash
-git clone https://github.com/vickynyp35/scientific-rag-research-engine.git
+Extracted text is divided into smaller overlapping chunks for efficient retrieval.
+
+3. Semantic Retrieval
+
+Sentence Transformer embeddings are generated for each chunk and stored in a FAISS vector index.
+
+4. Keyword Retrieval
+
+BM25 is used to identify chunks containing important query terms.
+
+5. Hybrid Retrieval
+
+Semantic and keyword scores are combined to improve retrieval quality.
+
+6. Reranking
+
+A Cross-Encoder reranks the retrieved chunks based on their relevance to the user's question.
+
+7. Answer Generation
+
+The most relevant research content is sent to Gemini with strict instructions to answer only from the provided papers.
+
+📊 Paper Comparison
+
+The system supports:
+
+Agreements between papers
+Contradictions and differences
+Research gaps
+Limitations and future research directions
+💬 Example Questions
+What are the main findings of these research papers?
+
+
+What are the limitations mentioned in the research papers?
+
+
+What methods were used in the papers?
+
+
+What are the similarities between the research papers?
+
+
+What research gaps are identified?
+🔐 API Key
+
+The Gemini API key is stored securely using Streamlit Secrets.
+
+Do not expose API keys in source code or GitHub repositories.
+
+▶️ Run Locally
+
+Clone the repository:
+
+git clone <YOUR_GITHUB_REPOSITORY_URL>
 cd scientific-rag-research-engine
-```
 
-### 2. Create a virtual environment
+Install dependencies:
 
-```bash
-python -m venv venv
-```
-
-Activate it on Windows:
-
-```bash
-venv\Scripts\activate
-```
-
-### 3. Install dependencies
-
-```bash
 pip install -r requirements.txt
-```
 
-### 4. Install and run Ollama
+Run the application:
 
-Make sure Ollama is installed and running on your computer.
-
-The application currently uses:
-
-```text
-llama3.2:3b
-```
-
-Pull the model if necessary:
-
-```bash
-ollama pull llama3.2:3b
-```
-
-### 5. Start the Streamlit application
-
-```bash
-python -m streamlit run app.py
-```
-
-The application will open in your browser.
-
-## 📁 Project Structure
-
-```text
+streamlit run app.py
+📁 Project Structure
 scientific-rag-research-engine/
 │
 ├── app.py
 ├── requirements.txt
 ├── README.md
 └── .gitignore
-```
+🎯 Project Goal
 
-## 🎯 Example Use Cases
+The goal of this project is to provide a reliable research assistant that helps users retrieve relevant information from multiple scientific papers while maintaining source-based answers.
 
-This system can be used for:
+👨‍💻 Author
 
-* 📚 Research paper analysis
-* 🔬 Scientific literature exploration
-* ⚖️ Comparing multiple papers
-* 🔎 Finding research gaps
-* 💬 Question answering over research documents
-* 📖 Academic research assistance
-
-## 🔮 Future Improvements
-
-* OCR support for scanned PDFs
-* Persistent vector database
-* Conversation history
-* Support for additional LLM providers
-* Improved citation verification
-* Advanced research-paper summarization
-* Cloud deployment
-
-## 👨‍💻 Project
-
-**Scientific RAG Research Engine**
-
-Built using Python, Streamlit, FAISS, BM25, Sentence Transformers, Cross-Encoder Reranking, and Ollama.
+Vigneshwaran B
+B.Tech Artificial Intelligence and Data Science

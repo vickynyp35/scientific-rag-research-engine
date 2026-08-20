@@ -3,6 +3,8 @@ import pymupdf
 import faiss
 import requests
 import re
+import time
+import random
 
 from sentence_transformers import SentenceTransformer, CrossEncoder
 from rank_bm25 import BM25Okapi
@@ -38,7 +40,8 @@ TOP_K_HYBRID = 10
 TOP_K_RERANK = 8
 TOP_K_FINAL = 5
 
-MAX_CONTEXT_CHARS = 7000
+MAX_CONTEXT_CHARS = 5000
+MAX_PAPER_CONTEXT_CHARS = 2500
 
 MIN_HYBRID_SCORE = 0.18
 MIN_RELEVANCE_SCORE = 0.25
@@ -52,9 +55,11 @@ FALLBACK_ANSWER = (
 # GEMINI CONFIG
 # =========================================================
 
-GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
+GEMINI_API_KEY = st.secrets.get(
+    "GEMINI_API_KEY",
+    ""
+)
 
-# Gemini model
 GEMINI_MODEL = "gemini-3.6-flash"
 
 GEMINI_URL = (
@@ -182,11 +187,16 @@ def min_max_normalize(values):
 # GEMINI ANSWER GENERATION
 # =========================================================
 
-def generate_answer(prompt):
+@st.cache_data(
+    ttl=300,
+    show_spinner=False
+)
+def cached_gemini_request(prompt):
 
     if not GEMINI_API_KEY:
 
-        return None, (
+        return (
+            None,
             "Gemini API key is missing. "
             "Add GEMINI_API_KEY in Streamlit Secrets."
         )
@@ -209,80 +219,210 @@ def generate_answer(prompt):
         ],
 
         "generationConfig": {
-            "maxOutputTokens": 700
+            "maxOutputTokens": 500
         }
     }
 
-    try:
+    max_retries = 2
 
-        response = requests.post(
-            GEMINI_URL,
-            headers=headers,
-            json=payload,
-            timeout=120
-        )
+    for attempt in range(max_retries + 1):
 
-        if response.status_code != 200:
+        try:
 
-            return None, (
-                f"Gemini API Error "
-                f"{response.status_code}: "
-                f"{response.text}"
+            response = requests.post(
+                GEMINI_URL,
+                headers=headers,
+                json=payload,
+                timeout=120
             )
 
-        data = response.json()
+            # =============================================
+            # RATE LIMIT / QUOTA
+            # =============================================
 
-        candidates = data.get(
-            "candidates",
-            []
-        )
+            if response.status_code == 429:
 
-        if not candidates:
+                if attempt < max_retries:
 
-            return None, (
-                "Gemini returned no answer."
+                    wait_time = (
+                        2 ** attempt
+                    ) * 5
+
+                    wait_time += random.uniform(
+                        0,
+                        2
+                    )
+
+                    time.sleep(
+                        wait_time
+                    )
+
+                    continue
+
+                return (
+                    None,
+                    "Gemini free-tier quota/rate limit "
+                    "has been reached. Please wait and "
+                    "try again later."
+                )
+
+            # =============================================
+            # SERVER ERRORS
+            # =============================================
+
+            if response.status_code in [500, 502, 503, 504]:
+
+                if attempt < max_retries:
+
+                    wait_time = (
+                        2 ** attempt
+                    ) * 3
+
+                    wait_time += random.uniform(
+                        0,
+                        1
+                    )
+
+                    time.sleep(
+                        wait_time
+                    )
+
+                    continue
+
+                return (
+                    None,
+                    "Gemini service is temporarily "
+                    "unavailable. Please try again later."
+                )
+
+            # =============================================
+            # OTHER API ERRORS
+            # =============================================
+
+            if response.status_code != 200:
+
+                try:
+
+                    error_data = response.json()
+
+                    error_message = (
+                        error_data
+                        .get("error", {})
+                        .get("message", response.text)
+                    )
+
+                except Exception:
+
+                    error_message = response.text
+
+                return (
+                    None,
+                    f"Gemini API Error "
+                    f"{response.status_code}: "
+                    f"{error_message}"
+                )
+
+            # =============================================
+            # PARSE RESPONSE
+            # =============================================
+
+            data = response.json()
+
+            candidates = data.get(
+                "candidates",
+                []
             )
 
-        parts = candidates[0].get(
-            "content",
-            {}
-        ).get(
-            "parts",
-            []
-        )
+            if not candidates:
 
-        answer = ""
+                return (
+                    None,
+                    "Gemini returned no answer."
+                )
 
-        for part in parts:
-
-            answer += part.get(
-                "text",
-                ""
+            content = candidates[0].get(
+                "content",
+                {}
             )
 
-        if not answer.strip():
-
-            return None, (
-                "Gemini returned an empty answer."
+            parts = content.get(
+                "parts",
+                []
             )
 
-        return answer.strip(), None
+            answer = ""
 
-    except requests.exceptions.Timeout:
+            for part in parts:
 
-        return None, (
-            "Gemini request timed out."
-        )
+                answer += part.get(
+                    "text",
+                    ""
+                )
 
-    except requests.exceptions.ConnectionError:
+            if not answer.strip():
 
-        return None, (
-            "Could not connect to Gemini API."
-        )
+                return (
+                    None,
+                    "Gemini returned an empty answer."
+                )
 
-    except Exception as e:
+            return (
+                answer.strip(),
+                None
+            )
 
-        return None, str(e)
+        except requests.exceptions.Timeout:
+
+            if attempt < max_retries:
+
+                time.sleep(
+                    2 ** attempt
+                )
+
+                continue
+
+            return (
+                None,
+                "Gemini request timed out."
+            )
+
+        except requests.exceptions.ConnectionError:
+
+            if attempt < max_retries:
+
+                time.sleep(
+                    2 ** attempt
+                )
+
+                continue
+
+            return (
+                None,
+                "Could not connect to Gemini API."
+            )
+
+        except Exception as e:
+
+            return (
+                None,
+                str(e)
+            )
+
+    return (
+        None,
+        "Gemini request failed."
+    )
+
+
+# =========================================================
+# GEMINI WRAPPER
+# =========================================================
+
+def generate_answer(prompt):
+
+    return cached_gemini_request(
+        prompt
+    )
 
 
 # =========================================================
@@ -345,11 +485,15 @@ Content:
 """
         )
 
-        used_pages.add(page_key)
+        used_pages.add(
+            page_key
+        )
 
         total_chars += len(content)
 
-    return "\n".join(context_parts)
+    return "\n".join(
+        context_parts
+    )
 
 
 # =========================================================
@@ -359,7 +503,7 @@ Content:
 def build_paper_context(
     pages,
     chunks,
-    max_chars=3500
+    max_chars=MAX_PAPER_CONTEXT_CHARS
 ):
 
     papers = {}
@@ -396,7 +540,9 @@ CONTENT:
 """
         )
 
-    return "\n".join(context_parts)
+    return "\n".join(
+        context_parts
+    )
 
 
 # =========================================================
@@ -547,13 +693,13 @@ if uploaded_files:
         "🤖 Loading AI models..."
     ):
 
-        # IMPORTANT:
-        # Do not use variable name "model" for Gemini.
-        # This is the embedding model.
+        embedding_model = (
+            load_embedding_model()
+        )
 
-        embedding_model = load_embedding_model()
-
-        reranker = load_reranker()
+        reranker = (
+            load_reranker()
+        )
 
 
     # =====================================================
@@ -705,6 +851,7 @@ RULES:
 5. Compare only the provided papers.
 6. Clearly identify paper names.
 7. Keep the answer structured.
+8. Keep the answer concise.
 
 TASK:
 
@@ -721,8 +868,10 @@ ANALYSIS:
                 "🧠 Comparing research papers..."
             ):
 
-                answer, error = generate_answer(
-                    comparison_prompt
+                answer, error = (
+                    generate_answer(
+                        comparison_prompt
+                    )
                 )
 
             if answer:
@@ -731,7 +880,9 @@ ANALYSIS:
                     "📊 Comparison Result"
                 )
 
-                st.write(answer)
+                st.write(
+                    answer
+                )
 
             else:
 
@@ -780,11 +931,12 @@ ANALYSIS:
             "🔍 Running hybrid search..."
         ):
 
-            question_embedding = embedding_model.encode(
-                [clean_question],
-                normalize_embeddings=True
-            ).astype(
-                "float32"
+            question_embedding = (
+                embedding_model.encode(
+                    [clean_question],
+                    normalize_embeddings=True
+                )
+                .astype("float32")
             )
 
 
@@ -888,7 +1040,9 @@ ANALYSIS:
             ]
 
             candidate_indices = (
-                candidate_indices[:TOP_K_RERANK]
+                candidate_indices[
+                    :TOP_K_RERANK
+                ]
             )
 
 
@@ -908,8 +1062,10 @@ ANALYSIS:
                 for idx in candidate_indices
             ]
 
-            rerank_scores = reranker.predict(
-                rerank_pairs
+            rerank_scores = (
+                reranker.predict(
+                    rerank_pairs
+                )
             )
 
 
@@ -1120,7 +1276,9 @@ ANSWER:
             ):
 
                 answer_text, error = (
-                    generate_answer(prompt)
+                    generate_answer(
+                        prompt
+                    )
                 )
 
             if answer_text:

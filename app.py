@@ -54,7 +54,9 @@ FALLBACK_ANSWER = (
 
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
 
-model = "gemini-3.6-flash"
+# Gemini model
+GEMINI_MODEL = "gemini-3.6-flash"
+
 GEMINI_URL = (
     f"https://generativelanguage.googleapis.com/v1beta/models/"
     f"{GEMINI_MODEL}:generateContent"
@@ -207,9 +209,6 @@ def generate_answer(prompt):
         ],
 
         "generationConfig": {
-
-            "temperature": 0.0,
-
             "maxOutputTokens": 700
         }
     }
@@ -548,7 +547,11 @@ if uploaded_files:
         "🤖 Loading AI models..."
     ):
 
-        model = load_embedding_model()
+        # IMPORTANT:
+        # Do not use variable name "model" for Gemini.
+        # This is the embedding model.
+
+        embedding_model = load_embedding_model()
 
         reranker = load_reranker()
 
@@ -561,7 +564,7 @@ if uploaded_files:
         "🔢 Creating document embeddings..."
     ):
 
-        embeddings = model.encode(
+        embeddings = embedding_model.encode(
             chunks,
             show_progress_bar=False,
             normalize_embeddings=True
@@ -777,7 +780,7 @@ ANALYSIS:
             "🔍 Running hybrid search..."
         ):
 
-            question_embedding = model.encode(
+            question_embedding = embedding_model.encode(
                 [clean_question],
                 normalize_embeddings=True
             ).astype(

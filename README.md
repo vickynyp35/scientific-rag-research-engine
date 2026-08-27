@@ -149,4 +149,8 @@ The goal of this project is to provide a reliable research assistant that helps 
 👨‍💻 Author
 
 Vigneshwaran B
+Rahul S
+Sivasakthi S 
+Sanjay M
+Praveen P 
 B.Tech Artificial Intelligence and Data Science

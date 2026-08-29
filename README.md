@@ -1,6 +1,6 @@
 # 🔬 Scientific RAG Research Engine
 
-A Multi-Paper Hybrid Retrieval-Augmented Generation (RAG) system for querying and comparing scientific research papers
+A Multi-Paper Hybrid Retrieval-Augmented Generation (RAG) system for querying and comparing scientific research papers.
 
 ## 🚀 Live Demo
 

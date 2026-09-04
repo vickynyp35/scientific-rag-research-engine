@@ -60,7 +60,7 @@ GEMINI_API_KEY = st.secrets.get(
     ""
 )
 
-GEMINI_MODEL = "gemini-3.6-flash"
+GEMINI_MODEL = "gemini-3.7-flash"
 
 GEMINI_URL = (
     f"https://generativelanguage.googleapis.com/v1beta/models/"
